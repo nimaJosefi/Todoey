@@ -1,33 +1,34 @@
 
 import UIKit
-import CoreData
+import RealmSwift
 
 class CategoryViewController: UITableViewController {
     
-    var categories = [Category]()
+    lazy var realm:Realm = {
+        return try! Realm()
+    }()
+    //let realm = try! Realm() -> outdated 
     
-    let context = (UIApplication.shared.delegate as! AppDelegate).persistentContainer.viewContext
+    var categories: Results<Category>? // changed from array (coreData) is collection type (realm)
     
     override func viewDidLoad() {
         super.viewDidLoad()
         
-        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "CategoryCell")
-        
-        loadCats()
+          loadCats()
     }
     
     //MARK: - TableView DataSource Methods
     
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         
-        categories.count
+        categories?.count ?? 1 // if categories is not nil, return number of categories. If is nil, then just return 1
     }
     
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         
         let cell = tableView.dequeueReusableCell(withIdentifier: "CategoryCell", for: indexPath)
         
-        cell.textLabel?.text = categories[indexPath.row].name
+        cell.textLabel?.text = categories?[indexPath.row].name ?? "No categories added yet..."
         
         return cell
     }
@@ -38,56 +39,54 @@ class CategoryViewController: UITableViewController {
         performSegue(withIdentifier: "goToItems", sender: self)
     }
     
-    override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
+    override func prepare(for segue: UIStoryboardSegue, sender: Any?) { // this is done prior to "performSegue"
         
-        let destinationVC = segue.destination as! GetKrakinVC
+        let destinationVC = segue.destination as! GetKrakinVC // points to items VC (i.e GetKrakin)
         
         if let indexPath = tableView.indexPathForSelectedRow {
-            destinationVC.selectedCategory = categories[indexPath.row]
+            destinationVC.selectedCategory = categories?[indexPath.row] // claiming that certain items belong to selected category 
             
         }
     }
     
     //MARK: - Data Manipulation Methods
     
-    func saveCat() {
+    func save(category: Category) {
         do {
-            try context.save()
+            try realm.write { // "write {}" allows us to commit changes
+                realm.add(category) // this is the change we want to commit (i.e category)
+            }
         } catch {
             print("Error: \(error.localizedDescription)")
         }
         
         tableView.reloadData()
     }
-    
+
     func loadCats() {
-        let request : NSFetchRequest<Category> = Category.fetchRequest()
-        do {
-            categories = try context.fetch(request)
-        } catch {
-            print("Error fetching data using context walla: \(error.localizedDescription)")
-        }
         
-        tableView.reloadData()
+        categories = realm.objects(Category.self) // look inside realm and fetch all objects that belong to category data type
+        
+        tableView.reloadData() // which calls all data source methods (i.e tableView delegates)
     }
-    
     
     //MARK: - Add New Categories
     
     @IBAction func addButtonPressed(_ sender: UIBarButtonItem) {
         
-        let alert = UIAlertController(title: "Create a category", message: "", preferredStyle: .alert)
-        
         var textField = UITextField()
         
-        let action = UIAlertAction(title: "Add my category", style: .default) { (action) in
+        let alert = UIAlertController(title: "Create a category", message: "", preferredStyle: .alert)
+        
+        let action = UIAlertAction(title: "Add", style: .default) { (action) in
             
-            let newCat = Category(context: self.context)
-            newCat.name = textField.text
+            let newCat = Category()
+            newCat.name = textField.text!
             
-            self.categories.append(newCat)
+            self.save(category: newCat)
             
-            self.saveCat()
+            // am I missing a reload?
+            // self.tableView.reloadData()
         }
         
         alert.addAction(action)

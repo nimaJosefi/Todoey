@@ -1,18 +1,21 @@
 
 import UIKit
-import CoreData
+import RealmSwift
 
 class GetKrakinVC: UITableViewController {
     
-    var itemArray = [Item]()
+    var todoItems: Results<Item>? // formally 'itemArray', changed as no longer an array as per realm
     
-    var selectedCategory: Category? {
+    lazy var realm:Realm = {
+        return try! Realm()
+    }()
+    // let realm = try! Realm()
+    
+    var selectedCategory: Category? { // able to load particular items when category is selected
         didSet {
             loadItems()
         }
     }
-    
-    let context = (UIApplication.shared.delegate as! AppDelegate).persistentContainer.viewContext
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -21,17 +24,19 @@ class GetKrakinVC: UITableViewController {
     //MARK: - TableView Datasource Methods
     
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        itemArray.count
+        todoItems?.count ?? 1
     }
     
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         
         let cell = tableView.dequeueReusableCell(withIdentifier: "MyItemCell", for: indexPath)
         
-        let item = itemArray[indexPath.row]
-        
-        cell.textLabel!.text = item.title
-        cell.accessoryType = item.done ? .checkmark : .none
+        if let item = todoItems?[indexPath.row] { // if item is !nil therefore be able to change title and done/not done properties
+            cell.textLabel!.text = item.title
+            cell.accessoryType = item.done ? .checkmark : .none
+        } else {
+            cell.textLabel?.text = "No items added"
+        }
         
         return cell
     }
@@ -40,11 +45,21 @@ class GetKrakinVC: UITableViewController {
     
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         
-        itemArray[indexPath.row].done = !itemArray[indexPath.row].done
+        if let item = todoItems?[indexPath.row] {
+            do {
+                
+                try realm.write({ // try to update and delete using realm
+                //realm.delete(item) >> if we want to add delete,
+                    item.done = !item.done
+                })
+            } catch {
+                print("Error saving done status walla: \(error)")
+            }
+            
+        }
+        tableView.reloadData() // to show done status immediately on screen
         
-        saveItems()
-        
-        tableView.deselectRow(at: indexPath, animated: true)
+        tableView.deselectRow(at: indexPath, animated: true) // so highlight of row is not permanent
         
     }
     
@@ -52,23 +67,27 @@ class GetKrakinVC: UITableViewController {
     
     @IBAction func addButtonTap(_ sender: UIBarButtonItem) {
         
-        let alert = UIAlertController(title: "Enter Task", message: "", preferredStyle: .alert)
-        
         var textField = UITextField()
+        
+        let alert = UIAlertController(title: "Enter Task", message: "", preferredStyle: .alert)
         
         let action = UIAlertAction(title: "Add Task", style: .default) { action in
             
-            let newItem = Item(context: self.context) // reps a 'row' therefore NSManagedObject
-            newItem.title = textField.text!
-            newItem.done = false
-            
-            // now we need to specify its parentCategory
-            newItem.parentCategory = self.selectedCategory
-            self.itemArray.append(newItem)
-        
-            self.saveItems()
+            if let currentCat = self.selectedCategory { // ability to add item to optional category (if)
+                do {
+                    try self.realm.write {
+                        let newItem = Item()
+                        newItem.title = textField.text!
+                        newItem.dateCreated = Date() // this means every created date gets "stamped" with current date/time
+                        currentCat.items.append(newItem)
+                    }
+                } catch {
+                    print("Error saving new items walla: \(error)")
+                }
+            }
+            self.tableView.reloadData()
         }
-    
+        
         alert.addTextField { (alertTextField) in
             alertTextField.placeholder = "Create new task"
             textField = alertTextField
@@ -82,52 +101,26 @@ class GetKrakinVC: UITableViewController {
     
     //MARK: - Model Manipulation Methods
     
-    func saveItems() {
+    func loadItems() {
         
-        do {
-            try context.save()
-        } catch {
-            print("Failure to save context walla: \(error.localizedDescription)")
-        }
+        todoItems = selectedCategory?.items.sorted(byKeyPath: "title", ascending: true)
+      //todoItems = selectedCategory?.items.sorted(byKeyPath: "dateCreated", ascending: true) >> if we want to sequence according to 'point in time' created
         
-        tableView.reloadData()
+        tableView.reloadData() // which specifies we should have as many cells as we have 'todoItems' for our current selected category
+        
     }
     
-    func loadItems(with request: NSFetchRequest<Item> = Item.fetchRequest(), predicate: NSPredicate? = nil) {
-        
-        let categoryPredicate = NSPredicate(format: "parentCategory.name MATCHES %@", selectedCategory!.name!)
-        
-        if let additionalPredicate = predicate {
-            request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [categoryPredicate, additionalPredicate])
-        } else {
-            request.predicate = categoryPredicate
-        }
-        
-        do {
-            itemArray = try context.fetch(request)
-        } catch {
-            print("Error fetching data using context walla: \(error.localizedDescription)")
-        }
-        
-        tableView.reloadData()
-        
-    }
 }
-   
-    //MARK: - SearchBar Methods
+
+//MARK: - SearchBar Methods
 
 extension GetKrakinVC: UISearchBarDelegate {
-
+    
     func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
         
-        let request : NSFetchRequest<Item> = Item.fetchRequest() // broad request
+        todoItems = todoItems?.filter("title CONTAINS[cd] %@", searchBar.text!).sorted(byKeyPath: "dateCreated", ascending: true)
         
-        // print(searchBar.text!) // assumption check
-        
-        let predicate = NSPredicate(format: "title CONTAINS[cd] %@", searchBar.text!)
-        request.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
-        
-        loadItems(with: request, predicate: predicate)
+        tableView.reloadData()
         
     }
     
@@ -139,11 +132,10 @@ extension GetKrakinVC: UISearchBarDelegate {
             DispatchQueue.main.async {
                 searchBar.resignFirstResponder()
             }
-             
+            
         }
-   
+        
     }
     
 }
-
 
